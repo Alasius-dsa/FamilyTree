@@ -87,8 +87,8 @@ class TreeCanvas(tk.Canvas):
             if not a or not b: continue
             colors=self.data.get_family_colors(a.family_name)
             points=[(a.x+self._box_width(a),a.y+BOX_H/2),((a.x+self._box_width(a)+b.x)/2,a.y+BOX_H/2),((a.x+self._box_width(a)+b.x)/2,b.y+BOX_H/2),(b.x,b.y+BOX_H/2)] if c.relation=="spouse" else [(a.x+self._box_width(a)/2,a.y+BOX_H),(a.x+self._box_width(a)/2,(a.y+BOX_H+b.y)/2),(b.x+self._box_width(b)/2,(a.y+BOX_H+b.y)/2),(b.x+self._box_width(b)/2,b.y)]
-            self._striped_polyline(points,colors,c.relation=="spouse")
-    def _striped_polyline(self,points,colors,dashed=False):
+            self._striped_polyline(points,colors,c.relation=="spouse",[1.0,1.0,1.0]) if c.relation=="spouse" else self._striped_polyline(points,colors,False,[1.35,0.9,0.75])
+    def _striped_polyline(self,points,colors,dashed=False,widths=None):
         # Draw a black/white outer stroke, then up to four parallel longitudinal stripes.
         def screen(p): return self.world_to_screen(p[0],p[1])
         outer=max(2,int((CONNECTION_WIDTH+4)*self.zoom))
@@ -98,14 +98,17 @@ class TreeCanvas(tk.Canvas):
         self.create_line(*flat,fill="#000000",width=outer,tags="connection")
         colors=colors[:4] or ["#ffffff"]
         n=len(colors); stripe=max(1,(CONNECTION_WIDTH*self.zoom)/n)
-        for i,color in enumerate(colors):
-            offset=(i-(n-1)/2)*stripe
-            for j in range(len(sp)-1):
-                x1,y1=sp[j];x2,y2=sp[j+1]
-                dx,dy=x2-x1,y2-y1; length=max((dx*dx+dy*dy)**0.5,1)
-                nx,ny=-dy/length,dx/length
+        for j in range(len(sp)-1):
+            scale=(widths[j] if widths and j<len(widths) else 1.0)
+            segment_inner=max(1,CONNECTION_WIDTH*self.zoom*scale)
+            segment_stripe=max(1,segment_inner/n)
+            x1,y1=sp[j];x2,y2=sp[j+1]
+            dx,dy=x2-x1,y2-y1; length=max((dx*dx+dy*dy)**0.5,1)
+            nx,ny=-dy/length,dx/length
+            for i,color in enumerate(colors):
+                offset=(i-(n-1)/2)*segment_stripe
                 ox,oy=nx*offset,ny*offset
-                self.create_line(x1+ox,y1+oy,x2+ox,y2+oy,fill=color,width=max(1,int(stripe)+1),tags="connection")
+                self.create_line(x1+ox,y1+oy,x2+ox,y2+oy,fill=color,width=max(1,int(segment_stripe)+1),tags="connection")
 
     def _polyline(self,points,dashed=False,width=None,width2=None):
         flat=[]
