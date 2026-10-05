@@ -1,1669 +1,213 @@
 from __future__ import annotations
-
-import os
-import tkinter as tk
-from tkinter import ttk, messagebox
-import webbrowser
+import os, tkinter as tk, webbrowser
+from tkinter import ttk, messagebox, filedialog
 from urllib.request import urlopen
+from models import FamilyTreeData, Person
+from connections import CONNECTION_WIDTH
+from dialogs import PersonDialog, FamilyDialog, BackgroundDialog, CalendarManagerDialog
 
-from models import (
-    FamilyTreeData,
-    Person
-)
-
-from connections import (
-    CONNECTION_WIDTH
-)
-
-
-BOX_W = 220
-BOX_H = 110
-
-MAX_BOX_WIDTH = BOX_W * 1.5
-
-MIN_FONT_SIZE = 8
-BASE_NAME_FONT_SIZE = 16
-
+BOX_W, BOX_H, MAX_BOX_WIDTH = 220, 110, 330
+BASE_FONT, MIN_FONT = 16, 8
 
 class TreeCanvas(tk.Canvas):
+    def __init__(self,master,data,on_edit,**kwargs):
+        super().__init__(master,background="#f4f4f4",highlightthickness=0,**kwargs)
+        self.data,self.on_edit=data,on_edit
+        self.zoom=1.0; self.pan_x=0.0; self.pan_y=0.0
+        self.drag_id=None; self.drag_offset=(0,0); self.pan_start=None
+        self.background_photo=None
+        self.bind("<ButtonPress-1>",self._press); self.bind("<B1-Motion>",self._drag); self.bind("<ButtonRelease-1>",self._release)
+        self.bind("<ButtonPress-2>",self._middle_press); self.bind("<B2-Motion>",self._middle_drag); self.bind("<ButtonRelease-2>",self._middle_release)
+        self.bind("<Button-3>",self._right_click); self.bind("<Double-Button-1>",self._double_click)
+        self.bind("<MouseWheel>",self._wheel); self.bind("<Button-4>",lambda e:self._zoom_at(e.x,e.y,1.1)); self.bind("<Button-5>",lambda e:self._zoom_at(e.x,e.y,.9))
+        self.bind("<Configure>",lambda e:self.redraw()); self.redraw()
 
-    def __init__(
-        self,
-        master,
-        data: FamilyTreeData,
-        on_edit,
-        **kwargs
-    ):
-
-        super().__init__(
-            master,
-            background="#f4f4f4",
-            highlightthickness=0,
-            **kwargs
-        )
-
-        self.data = data
-        self.on_edit = on_edit
-
-        self.zoom = 1.0
-
-        self.drag_id = None
-
-        self.drag_offset = (
-            0,
-            0
-        )
-
-        self.background_image = None
-        self.background_photo = None
-
-        self.bind(
-            "<ButtonPress-1>",
-            self._press
-        )
-
-        self.bind(
-            "<B1-Motion>",
-            self._drag
-        )
-
-        self.bind(
-            "<ButtonRelease-1>",
-            self._release
-        )
-
-        self.bind(
-            "<Button-3>",
-            self._right_click
-        )
-
-        self.bind(
-            "<Double-Button-1>",
-            self._double_click
-        )
-
-        self.bind(
-            "<MouseWheel>",
-            self._wheel
-        )
-
-        self.bind(
-            "<Configure>",
-            self._on_resize
-        )
-
-        self.redraw()
-
-    # =============================================================
-    # Zeichnen
-    # =============================================================
-
+    def world_to_screen(self,x,y): return x*self.zoom+self.pan_x,y*self.zoom+self.pan_y
+    def screen_to_world(self,x,y): return (x-self.pan_x)/self.zoom,(y-self.pan_y)/self.zoom
     def redraw(self):
-
-        self.delete("all")
-
-        self._draw_background()
-
-        self._draw_connections()
-
-        self._draw_persons()
-
-    # =============================================================
-    # Hintergrund
-    # =============================================================
-
-    def _draw_background(self):
-
-        source = self.data.background.source
-
-        if not source:
-            return
-
-        try:
-            from PIL import Image, ImageTk
-
-            image = self._load_background_image(
-                source
-            )
-
-            if image is None:
-                return
-
-            canvas_width = max(
-                1,
-                self.winfo_width()
-            )
-
-            canvas_height = max(
-                1,
-                self.winfo_height()
-            )
-
-            if self.data.background.mode == "stretch":
-
-                image = image.resize(
-                    (
-                        canvas_width,
-                        canvas_height
-                    )
-                )
-
-                self.background_photo = ImageTk.PhotoImage(
-                    image
-                )
-
-                self.create_image(
-                    0,
-                    0,
-                    anchor="nw",
-                    image=self.background_photo,
-                    tags="background"
-                )
-
-            else:
-
-                # Tile
-                tile = image
-
-                # Genug große Fläche erzeugen.
-                result = Image.new(
-                    "RGB",
-                    (
-                        canvas_width,
-                        canvas_height
-                    )
-                )
-
-                for x in range(
-                    0,
-                    canvas_width,
-                    tile.width
-                ):
-                    for y in range(
-                        0,
-                        canvas_height,
-                        tile.height
-                    ):
-
-                        result.paste(
-                            tile,
-                            (
-                                x,
-                                y
-                            )
-                        )
-
-                self.background_photo = ImageTk.PhotoImage(
-                    result
-                )
-
-                self.create_image(
-                    0,
-                    0,
-                    anchor="nw",
-                    image=self.background_photo,
-                    tags="background"
-                )
-
-            self.tag_lower(
-                "background"
-            )
-
-        except ImportError:
-
-            self.create_text(
-                20,
-                20,
-                anchor="nw",
-                text=(
-                    "Für Bildhintergründe wird "
-                    "Pillow benötigt:\n"
-                    "pip install pillow"
-                ),
-                fill="#aa0000",
-                tags="background"
-            )
-
-    def _load_background_image(
-        self,
-        source
-    ):
-
+        self.delete("all"); self._draw_background(); self._draw_connections(); self._draw_persons()
+    def _load_background_image(self,source):
         from PIL import Image
         from io import BytesIO
-
-        # HTTP / HTTPS
-        if source.startswith(
-            "http://"
-        ) or source.startswith(
-            "https://"
-        ):
-
-            with urlopen(
-                source,
-                timeout=10
-            ) as response:
-
-                data = response.read()
-
-            return Image.open(
-                BytesIO(data)
-            ).convert(
-                "RGB"
-            )
-
-        # Lokale Datei
-        if os.path.isfile(source):
-
-            return Image.open(
-                source
-            ).convert(
-                "RGB"
-            )
-
+        if source.startswith(("http://","https://")):
+            with urlopen(source,timeout=10) as r: return Image.open(BytesIO(r.read())).convert("RGB")
+        if os.path.isfile(source): return Image.open(source).convert("RGB")
         return None
+    def _draw_background(self):
+        source=self.data.background.source
+        if not source:return
+        try:
+            from PIL import Image,ImageTk
+            image=self._load_background_image(source)
+            if image is None:return
+            w=max(1,self.winfo_width()); h=max(1,self.winfo_height())
+            if self.data.background.mode=="stretch":
+                image=image.resize((w,h))
+                self.background_photo=ImageTk.PhotoImage(image)
+                self.create_image(0,0,anchor="nw",image=self.background_photo,tags="background")
+            else:
+                result=Image.new("RGB",(w,h))
+                for x in range(0,w,image.width):
+                    for y in range(0,h,image.height): result.paste(image,(x,y))
+                self.background_photo=ImageTk.PhotoImage(result)
+                self.create_image(0,0,anchor="nw",image=self.background_photo,tags="background")
+            self.tag_lower("background")
+        except Exception: pass
 
-    def _on_resize(
-        self,
-        event
-    ):
-
-        self.redraw()
-
-    # =============================================================
-    # Verbindungen
-    # =============================================================
+    def _box_width(self,p):
+        longest=max(len(p.first_name or ""),len(p.name_prefix or ""),len(p.family_name or ""),1)
+        return min(MAX_BOX_WIDTH,max(BOX_W,longest*9+30))
+    def _font_size(self,p):
+        w=self._box_width(p); longest=max(len(p.display_name()),1)
+        return max(MIN_FONT,int(BASE_FONT*max(1,(w-20))/(longest*9)))
 
     def _draw_connections(self):
-
-        for connection in self.data.connections:
-
-            source = self.data.persons.get(
-                connection.source
-            )
-
-            target = self.data.persons.get(
-                connection.target
-            )
-
-            if not source or not target:
-                continue
-
-            if connection.relation == "spouse":
-
-                self._draw_spouse_connection(
-                    source,
-                    target
-                )
-
-            else:
-
-                self._draw_parent_connection(
-                    source,
-                    target
-                )
-
-    def _draw_parent_connection(
-        self,
-        source,
-        target
-    ):
-
-        ax = source.x + self._box_width(
-            source
-        ) / 2
-
-        ay = source.y + BOX_H
-
-        bx = target.x + self._box_width(
-            target
-        ) / 2
-
-        by = target.y
-
-        mid_y = (ay + by) / 2
-
-        points = [
-            (
-                ax,
-                ay
-            ),
-            (
-                ax,
-                mid_y
-            ),
-            (
-                bx,
-                mid_y
-            ),
-            (
-                bx,
-                by
-            )
-        ]
-
-        self._draw_polyline(
-            points,
-            dashed=False
-        )
-
-    def _draw_spouse_connection(
-        self,
-        source,
-        target
-    ):
-
-        ax = source.x + self._box_width(
-            source
-        )
-
-        ay = source.y + BOX_H / 2
-
-        bx = target.x
-
-        by = target.y + BOX_H / 2
-
-        mid_x = (ax + bx) / 2
-
-        points = [
-            (
-                ax,
-                ay
-            ),
-            (
-                mid_x,
-                ay
-            ),
-            (
-                mid_x,
-                by
-            ),
-            (
-                bx,
-                by
-            )
-        ]
-
-        self._draw_polyline(
-            points,
-            dashed=True
-        )
-
-    def _draw_polyline(
-        self,
-        points,
-        dashed=False
-    ):
-
-        flattened = []
-
-        for x, y in points:
-
-            flattened.extend(
-                [
-                    x * self.zoom,
-                    y * self.zoom
-                ]
-            )
-
-        kwargs = {
-            "fill": "#333333",
-            "width": CONNECTION_WIDTH
-        }
-
-        if dashed:
-            kwargs["dash"] = (
-                10,
-                7
-            )
-
-        self.create_line(
-            *flattened,
-            **kwargs,
-            tags="connection"
-        )
-
-    # =============================================================
-    # Box width / text size
-    # =============================================================
-
-    def _box_width(
-        self,
-        person: Person
-    ) -> float:
-
-        first = person.first_name or ""
-        family = person.family_name or ""
-
-        longest = max(
-            len(first),
-            len(family),
-            1
-        )
-
-        # Näherungsweise benötigte Breite.
-        required = (
-            longest * 9
-            + 30
-        )
-
-        return min(
-            MAX_BOX_WIDTH,
-            max(
-                BOX_W,
-                required
-            )
-        )
-
-    def _font_size(
-        self,
-        person: Person
-    ) -> int:
-
-        width = self._box_width(
-            person
-        )
-
-        longest = max(
-            len(person.first_name or ""),
-            len(person.family_name or ""),
-            1
-        )
-
-        available = width - 20
-
-        estimated_text_width = (
-            longest
-            * BASE_NAME_FONT_SIZE
-            * 0.58
-        )
-
-        if estimated_text_width <= available:
-            return BASE_NAME_FONT_SIZE
-
-        size = (
-            BASE_NAME_FONT_SIZE
-            * available
-            / estimated_text_width
-        )
-
-        return max(
-            MIN_FONT_SIZE,
-            int(size)
-        )
-
-    # =============================================================
-    # Personen
-    # =============================================================
-
+        for c in self.data.connections:
+            a,b=self.data.persons.get(c.source),self.data.persons.get(c.target)
+            if not a or not b: continue
+            if c.relation=="spouse": self._polyline([(a.x+self._box_width(a),a.y+BOX_H/2),((a.x+self._box_width(a)+b.x)/2,a.y+BOX_H/2),((a.x+self._box_width(a)+b.x)/2,b.y+BOX_H/2),(b.x,b.y+BOX_H/2)],True)
+            else: self._parent_line(a,b)
+    def _parent_line(self,a,b):
+        ax,ay=a.x+self._box_width(a)/2,a.y+BOX_H; bx,by=b.x+self._box_width(b)/2,b.y
+        mid=(ay+by)/2
+        # Draw in three segments: thicker at parent end, tapering toward child.
+        self._polyline([(ax,ay),(ax,mid)],False,CONNECTION_WIDTH*1.35,CONNECTION_WIDTH*.75)
+        self._polyline([(ax,mid),(bx,mid),(bx,by)],False,CONNECTION_WIDTH*.75,CONNECTION_WIDTH*.75)
+    def _polyline(self,points,dashed=False,width=None,width2=None):
+        flat=[]
+        for x,y in points: flat.extend(self.world_to_screen(x,y))
+        kwargs={"fill":"#333333","width":max(1,int((width or CONNECTION_WIDTH)*self.zoom))}
+        if dashed: kwargs["dash"]=(max(2,int(10*self.zoom)),max(2,int(7*self.zoom)))
+        self.create_line(*flat,**kwargs,tags="connection")
     def _draw_persons(self):
-
-        for person in self.data.persons.values():
-
-            self._draw_person(
-                person
-            )
-
-    def _draw_person(
-        self,
-        person
-    ):
-
-        x = person.x * self.zoom
-        y = person.y * self.zoom
-
-        width = (
-            self._box_width(person)
-            * self.zoom
-        )
-
-        height = (
-            BOX_H
-            * self.zoom
-        )
-
-        colors = self.data.get_family_colors(
-            person.family_name
-        )
-
-        tag = f"person:{person.id}"
-
-        # ---------------------------------------------------------
-        # Hausfarben
-        # ---------------------------------------------------------
-
-        if len(colors) == 1:
-
-            self.create_rectangle(
-                x,
-                y,
-                x + width,
-                y + height,
-                fill=colors[0],
-                outline="#222222",
-                width=2,
-                tags=tag
-            )
-
+        for p in self.data.persons.values(): self._draw_person(p)
+    def _draw_person(self,p):
+        x,y=self.world_to_screen(p.x,p.y); w,h=self._box_width(p)*self.zoom,BOX_H*self.zoom
+        colors=self.data.get_family_colors(p.family_name); tag=f"person:{p.id}"
+        if len(colors)==1:
+            self.create_rectangle(x,y,x+w,y+h,fill=colors[0],outline="#222",width=2,tags=tag)
         else:
+            # Exactly two families are split 50/50.
+            stripe=w/len(colors)
+            for i,color in enumerate(colors): self.create_rectangle(x+i*stripe,y,x+(i+1)*stripe+1,y+h,fill=color,outline="",tags=tag)
+            self.create_rectangle(x,y,x+w,y+h,fill="",outline="#222",width=2,tags=tag)
+        if self.zoom>=0.42:
+            fs=max(MIN_FONT,int(self._font_size(p)*self.zoom))
+            self.create_text(x+10*self.zoom,y+25*self.zoom,anchor="w",text=p.first_name,font=("Arial",fs,"bold"),tags=tag)
+            self.create_text(x+10*self.zoom,y+48*self.zoom,anchor="w",text=" ".join(q for q in (p.name_prefix,p.family_name) if q),font=("Arial",fs),tags=tag)
+        if self.zoom>=0.62:
+            self.create_text(x+10*self.zoom,y+73*self.zoom,anchor="w",text=f"Geb.: {self._date_text(p.birth_date)}",font=("Arial",max(7,int(11*self.zoom))),tags=tag)
+            self.create_text(x+10*self.zoom,y+92*self.zoom,anchor="w",text=f"Tod: {self._date_text(p.death_date)}",font=("Arial",max(7,int(11*self.zoom))),tags=tag)
+        if p.link and self.zoom>=0.35:self.create_text(x+w-17*self.zoom,y+17*self.zoom,text="🌐",font=("Arial",max(8,int(13*self.zoom))),tags=tag)
+    def _date_text(self,v):
+        if not v:return "—"
+        if isinstance(v,dict):
+            from calendar_system import get_calendar
+            c=get_calendar(v.get("calendar_id",""))
+            return c.format_date(v["day"],v["month"],v["year"]) if c else f'{v["day"]}.{v["month"]}.{v["year"]}'
+        return str(v)
 
-            stripe_width = (
-                width / len(colors)
-            )
-
-            for index, color in enumerate(
-                colors
-            ):
-
-                self.create_rectangle(
-                    x + index * stripe_width,
-                    y,
-                    x + (
-                        index + 1
-                    ) * stripe_width + 1,
-                    y + height,
-                    fill=color,
-                    outline="",
-                    tags=tag
-                )
-
-            self.create_rectangle(
-                x,
-                y,
-                x + width,
-                y + height,
-                fill="",
-                outline="#222222",
-                width=2,
-                tags=tag
-            )
-
-        # ---------------------------------------------------------
-        # Name
-        # ---------------------------------------------------------
-
-        font_size = self._font_size(
-            person
-        )
-
-        self.create_text(
-            x + 10 * self.zoom,
-            y + 25 * self.zoom,
-            anchor="w",
-            text=person.first_name,
-            font=(
-                "Arial",
-                max(
-                    MIN_FONT_SIZE,
-                    int(font_size * self.zoom)
-                ),
-                "bold"
-            ),
-            tags=tag
-        )
-
-        self.create_text(
-            x + 10 * self.zoom,
-            y + 48 * self.zoom,
-            anchor="w",
-            text=person.family_name,
-            font=(
-                "Arial",
-                max(
-                    MIN_FONT_SIZE,
-                    int(font_size * self.zoom)
-                )
-            ),
-            tags=tag
-        )
-
-        # ---------------------------------------------------------
-        # Geburtsdatum
-        # ---------------------------------------------------------
-
-        self.create_text(
-            x + 10 * self.zoom,
-            y + 73 * self.zoom,
-            anchor="w",
-            text=(
-                f"Geb.: "
-                f"{person.birth_date or '—'}"
-            ),
-            font=(
-                "Arial",
-                max(
-                    7,
-                    int(11 * self.zoom)
-                )
-            ),
-            tags=tag
-        )
-
-        # ---------------------------------------------------------
-        # Todesdatum
-        # ---------------------------------------------------------
-
-        self.create_text(
-            x + 10 * self.zoom,
-            y + 92 * self.zoom,
-            anchor="w",
-            text=(
-                f"Tod: "
-                f"{person.death_date or '—'}"
-            ),
-            font=(
-                "Arial",
-                max(
-                    7,
-                    int(11 * self.zoom)
-                )
-            ),
-            tags=tag
-        )
-
-        # ---------------------------------------------------------
-        # Welt-Symbol
-        # ---------------------------------------------------------
-
-        if person.link:
-
-            self.create_text(
-                x + width - 17 * self.zoom,
-                y + 17 * self.zoom,
-                text="🌐",
-                font=(
-                    "Arial",
-                    max(
-                        8,
-                        int(13 * self.zoom)
-                    )
-                ),
-                tags=tag
-            )
-
-    # =============================================================
-    # Koordinaten
-    # =============================================================
-
-    def _person_at(
-        self,
-        event
-    ):
-
-        world_x = (
-            event.x / self.zoom
-        )
-
-        world_y = (
-            event.y / self.zoom
-        )
-
-        persons = list(
-            self.data.persons.values()
-        )
-
-        for person in reversed(
-            persons
-        ):
-
-            width = self._box_width(
-                person
-            )
-
-            if (
-                person.x
-                <= world_x
-                <= person.x + width
-                and
-                person.y
-                <= world_y
-                <= person.y + BOX_H
-            ):
-                return person
-
+    def _person_at(self,e):
+        wx,wy=self.screen_to_world(e.x,e.y)
+        for p in reversed(list(self.data.persons.values())):
+            if p.x<=wx<=p.x+self._box_width(p) and p.y<=wy<=p.y+BOX_H:return p
         return None
+    def _press(self,e):
+        p=self._person_at(e)
+        if not p:self.drag_id=None; return
+        self.drag_id=p.id; wx,wy=self.screen_to_world(e.x,e.y); self.drag_offset=(wx-p.x,wy-p.y)
+    def _drag(self,e):
+        if not self.drag_id:return
+        p=self.data.persons[self.drag_id]; wx,wy=self.screen_to_world(e.x,e.y)
+        p.x=wx-self.drag_offset[0]; p.y=wy-self.drag_offset[1]; self.redraw()
+    def _release(self,e):self.drag_id=None
+    def _middle_press(self,e):self.pan_start=(e.x,e.y,self.pan_x,self.pan_y)
+    def _middle_drag(self,e):
+        if self.pan_start:
+            x,y,px,py=self.pan_start; self.pan_x=px+e.x-x; self.pan_y=py+e.y-y; self.redraw()
+    def _middle_release(self,e):self.pan_start=None
+    def _wheel(self,e):
+        self._zoom_at(e.x,e.y,1.1 if e.delta>0 else .9)
+    def _zoom_at(self,sx,sy,factor):
+        old=self.zoom; new=max(.05,min(5.0,old*factor))
+        if new==old:return
+        wx,wy=self.screen_to_world(sx,sy); self.zoom=new
+        self.pan_x=sx-wx*new; self.pan_y=sy-wy*new; self.redraw()
+    def _right_click(self,e):
+        p=self._person_at(e)
+        if not p:return
+        menu=tk.Menu(self,tearoff=False); menu.add_command(label="Editieren",command=lambda:self.on_edit(p))
+        if p.link:menu.add_command(label="Link öffnen",command=lambda:webbrowser.open(p.link))
+        menu.add_separator(); menu.add_command(label="Person löschen",command=lambda:self._delete_person(p))
+        try:menu.tk_popup(e.x_root,e.y_root)
+        finally:menu.grab_release()
+    def _double_click(self,e):
+        p=self._person_at(e)
+        if p:self.on_edit(p)
+    def _delete_person(self,p):
+        if messagebox.askyesno("Person löschen",f"Soll {p.display_name()} wirklich gelöscht werden?"):
+            self.data.remove_person(p.id); self.redraw()
 
-    # =============================================================
-    # Drag & Drop
-    # =============================================================
-
-    def _press(
-        self,
-        event
-    ):
-
-        person = self._person_at(
-            event
-        )
-
-        if not person:
-            self.drag_id = None
-            return
-
-        self.drag_id = person.id
-
-        world_x = (
-            event.x / self.zoom
-        )
-
-        world_y = (
-            event.y / self.zoom
-        )
-
-        self.drag_offset = (
-            world_x - person.x,
-            world_y - person.y
-        )
-
-    def _drag(
-        self,
-        event
-    ):
-
-        if not self.drag_id:
-            return
-
-        person = self.data.persons[
-            self.drag_id
-        ]
-
-        world_x = (
-            event.x / self.zoom
-        )
-
-        world_y = (
-            event.y / self.zoom
-        )
-
-        person.x = max(
-            0,
-            world_x - self.drag_offset[0]
-        )
-
-        person.y = max(
-            0,
-            world_y - self.drag_offset[1]
-        )
-
+    def auto_layout(self):
+        persons=self.data.persons
+        if not persons:return
+        parents={p.id:[] for p in persons}
+        children={p.id:[] for p in persons}
+        for c in self.data.connections:
+            if c.relation=="parent" and c.source in persons and c.target in persons:
+                parents[c.target].append(c.source); children[c.source].append(c.target)
+        generations={}
+        def gen(pid,stack=None):
+            if pid in generations:return generations[pid]
+            stack=stack or set()
+            if pid in stack:return 0
+            stack.add(pid)
+            generations[pid]=max((gen(x,stack)+1 for x in parents[pid]),default=0)
+            return generations[pid]
+        for pid in persons:gen(pid)
+        rows={}
+        for pid,g in generations.items():rows.setdefault(g,[]).append(pid)
+        order={pid:i for i,pid in enumerate(persons)}
+        for row in rows.values():row.sort(key=lambda pid:order[pid])
+        y_gap=80
+        for g,row in sorted(rows.items()):
+            x=80
+            for pid in row:
+                p=persons[pid]; p.x=x; p.y=80+g*(BOX_H+y_gap); x+=self._box_width(p)+4
+        # Keep related people adjacent without sacrificing the 4px non-overlap invariant.
         self.redraw()
-
-    def _release(
-        self,
-        event
-    ):
-
-        self.drag_id = None
-
-    # =============================================================
-    # Rechtsklick
-    # =============================================================
-
-    def _right_click(
-        self,
-        event
-    ):
-
-        person = self._person_at(
-            event
-        )
-
-        if not person:
-            return
-
-        menu = tk.Menu(
-            self,
-            tearoff=False
-        )
-
-        menu.add_command(
-            label="Editieren",
-            command=lambda: self.on_edit(
-                person
-            )
-        )
-
-        if person.link:
-
-            menu.add_command(
-                label="Link öffnen",
-                command=lambda: webbrowser.open(
-                    person.link
-                )
-            )
-
-        menu.add_separator()
-
-        menu.add_command(
-            label="Person löschen",
-            command=lambda: self._delete_person(
-                person
-            )
-        )
-
-        try:
-
-            menu.tk_popup(
-                event.x_root,
-                event.y_root
-            )
-
-        finally:
-
-            menu.grab_release()
-
-    def _double_click(
-        self,
-        event
-    ):
-
-        person = self._person_at(
-            event
-        )
-
-        if person:
-
-            self.on_edit(
-                person
-            )
-
-    def _delete_person(
-        self,
-        person
-    ):
-
-        if not messagebox.askyesno(
-            "Person löschen",
-            (
-                f"Soll {person.display_name()} "
-                f"wirklich gelöscht werden?"
-            )
-        ):
-            return
-
-        self.data.remove_person(
-            person.id
-        )
-
-        self.redraw()
-
-    # =============================================================
-    # Zoom
-    # =============================================================
-
-    def _wheel(
-        self,
-        event
-    ):
-
-        if event.delta > 0:
-            factor = 1.1
-        else:
-            factor = 0.9
-
-        self.zoom = min(
-            3.0,
-            max(
-                0.25,
-                self.zoom * factor
-            )
-        )
-
-        self.redraw()
-
 
 class SidePanel(ttk.Frame):
-
-    def __init__(
-        self,
-        master,
-        data: FamilyTreeData,
-        refresh,
-        **kwargs
-    ):
-
-        super().__init__(
-            master,
-            padding=8,
-            **kwargs
-        )
-
-        self.data = data
-        self.refresh = refresh
-
-        # ---------------------------------------------------------
-        # Personen
-        # ---------------------------------------------------------
-
-        ttk.Label(
-            self,
-            text="Stammbaum",
-            font=(
-                "Arial",
-                15,
-                "bold"
-            )
-        ).pack(
-            anchor="w"
-        )
-
-        ttk.Button(
-            self,
-            text="+ Person hinzufügen",
-            command=self.add_person
-        ).pack(
-            fill="x",
-            pady=(8, 10)
-        )
-
-        ttk.Label(
-            self,
-            text="Personen",
-            font=(
-                "Arial",
-                11,
-                "bold"
-            )
-        ).pack(
-            anchor="w"
-        )
-
-        self.listbox = tk.Listbox(
-            self,
-            height=12
-        )
-
-        self.listbox.pack(
-            fill="both",
-            expand=True
-        )
-
-        self.listbox.bind(
-            "<Double-Button-1>",
-            self.edit_selected
-        )
-
-        # ---------------------------------------------------------
-        # Familien
-        # ---------------------------------------------------------
-
-        ttk.Label(
-            self,
-            text="Familien",
-            font=(
-                "Arial",
-                11,
-                "bold"
-            )
-        ).pack(
-            anchor="w",
-            pady=(12, 4)
-        )
-
-        self.family_listbox = tk.Listbox(
-            self,
-            height=8
-        )
-
-        self.family_listbox.pack(
-            fill="both",
-            expand=True
-        )
-
-        self.family_listbox.bind(
-            "<Double-Button-1>",
-            self.edit_family
-        )
-
-        self.family_listbox.bind(
-            "<Button-3>",
-            self.family_context_menu
-        )
-
-        ttk.Button(
-            self,
-            text="+ Familie hinzufügen",
-            command=self.add_family
-        ).pack(
-            fill="x",
-            pady=(5, 0)
-        )
-
-        # ---------------------------------------------------------
-        # Hintergrund
-        # ---------------------------------------------------------
-
-        ttk.Label(
-            self,
-            text="Hintergrund",
-            font=(
-                "Arial",
-                11,
-                "bold"
-            )
-        ).pack(
-            anchor="w",
-            pady=(15, 4)
-        )
-
-        ttk.Button(
-            self,
-            text="Hintergrund einstellen",
-            command=self.edit_background
-        ).pack(
-            fill="x"
-        )
-
+    def __init__(self,master,data,refresh,**kwargs):
+        super().__init__(master,padding=8,**kwargs); self.data=data; self.refresh=refresh
+        ttk.Label(self,text="Stammbaum",font=("Arial",15,"bold")).pack(anchor="w")
+        ttk.Button(self,text="+ Person hinzufügen",command=self.add_person).pack(fill="x",pady=(8,10))
+        ttk.Button(self,text="Kalender verwalten",command=self.manage_calendars).pack(fill="x",pady=2)
+        ttk.Button(self,text="Automatisch anordnen",command=self.auto_layout).pack(fill="x",pady=2)
+        ttk.Button(self,text="Hintergrund",command=self.background).pack(fill="x",pady=2)
+        ttk.Label(self,text="Personen",font=("Arial",11,"bold")).pack(anchor="w",pady=(10,0))
+        self.listbox=tk.Listbox(self,height=12); self.listbox.pack(fill="both",expand=True); self.listbox.bind("<Double-Button-1>",self.edit_selected)
+        ttk.Label(self,text="Familien",font=("Arial",11,"bold")).pack(anchor="w",pady=(10,0))
+        self.family_list=tk.Listbox(self,height=6); self.family_list.pack(fill="x"); self.family_list.bind("<Double-Button-1>",self.edit_family)
         self.update_list()
-
-    # =============================================================
-    # Personenliste
-    # =============================================================
-
     def update_list(self):
-
-        self.listbox.delete(
-            0,
-            "end"
-        )
-
-        for person in self.data.persons.values():
-
-            self.listbox.insert(
-                "end",
-                person.display_name()
-            )
-
-        self.family_listbox.delete(
-            0,
-            "end"
-        )
-
-        for family in self.data.families.values():
-
-            self.family_listbox.insert(
-                "end",
-                family.name
-            )
-
+        self.listbox.delete(0,"end")
+        for p in self.data.persons.values():self.listbox.insert("end",p.display_name())
+        self.family_list.delete(0,"end")
+        for f in self.data.families.values():self.family_list.insert("end",f.name)
     def add_person(self):
-
         import uuid
+        p=Person(id=str(uuid.uuid4()),first_name="Neue",family_name="Person"); self.data.add_person(p); self.refresh()
+        # app callback opens editor only for explicit canvas/add button in old code; open via list is enough.
+    def edit_selected(self,e=None):
+        if self.listbox.curselection():
+            p=list(self.data.persons.values())[self.listbox.curselection()[0]]
+            self.master.master.open_editor(p)
+    def edit_family(self,e=None):
+        if self.family_list.curselection():
+            f=list(self.data.families.values())[self.family_list.curselection()[0]]; FamilyDialog(self,self.data,f,self.refresh)
+    def manage_calendars(self):CalendarManagerDialog(self,self.refresh)
+    def background(self):BackgroundDialog(self,self.data,self.refresh)
+    def auto_layout(self):
+        canvas=self.master.master.canvas; canvas.auto_layout(); self.refresh()
 
-        person = Person(
-            id=str(uuid.uuid4()),
-            first_name="Neue",
-            family_name="Person",
-            x=100 + len(
-                self.data.persons
-            ) * 30,
-            y=100 + len(
-                self.data.persons
-            ) * 30
-        )
-
-        self.data.add_person(
-            person
-        )
-
-        self.refresh()
-
-    def edit_selected(
-        self,
-        event=None
-    ):
-
-        selection = (
-            self.listbox.curselection()
-        )
-
-        if not selection:
-            return
-
-        persons = list(
-            self.data.persons.values()
-        )
-
-        person = persons[
-            selection[0]
-        ]
-
-        self.master.master.open_editor(
-            person
-        )
-
-    # =============================================================
-    # Familien
-    # =============================================================
-
-    def add_family(self):
-
-        FamilyDialog(
-            self,
-            self.data,
-            None,
-            self.refresh
-        )
-
-    def edit_family(
-        self,
-        event=None
-    ):
-
-        selection = (
-            self.family_listbox.curselection()
-        )
-
-        if not selection:
-            return
-
-        families = list(
-            self.data.families.values()
-        )
-
-        family = families[
-            selection[0]
-        ]
-
-        FamilyDialog(
-            self,
-            self.data,
-            family,
-            self.refresh
-        )
-
-    def family_context_menu(
-        self,
-        event
-    ):
-
-        index = self.family_listbox.nearest(
-            event.y
-        )
-
-        if index < 0:
-            return
-
-        self.family_listbox.selection_clear(
-            0,
-            "end"
-        )
-
-        self.family_listbox.selection_set(
-            index
-        )
-
-        families = list(
-            self.data.families.values()
-        )
-
-        if index >= len(families):
-            return
-
-        family = families[index]
-
-        menu = tk.Menu(
-            self,
-            tearoff=False
-        )
-
-        menu.add_command(
-            label="Editieren",
-            command=lambda: FamilyDialog(
-                self,
-                self.data,
-                family,
-                self.refresh
-            )
-        )
-
-        menu.add_command(
-            label="Löschen",
-            command=lambda: self.delete_family(
-                family.name
-            )
-        )
-
-        try:
-
-            menu.tk_popup(
-                event.x_root,
-                event.y_root
-            )
-
-        finally:
-
-            menu.grab_release()
-
-    def delete_family(
-        self,
-        name
-    ):
-
-        if not messagebox.askyesno(
-            "Familie löschen",
-            (
-                f"Familie '{name}' löschen?\n\n"
-                "Die Personen behalten ihren "
-                "Familiennamen. Die Farbe wird "
-                "jedoch entfernt."
-            )
-        ):
-            return
-
-        self.data.remove_family(
-            name
-        )
-
-        self.refresh()
-
-    # =============================================================
-    # Hintergrund
-    # =============================================================
-
-    def edit_background(self):
-
-        BackgroundDialog(
-            self,
-            self.data,
-            self.refresh
-        )
-
-
-class FamilyDialog(tk.Toplevel):
-
-    def __init__(
-        self,
-        master,
-        data,
-        family,
-        refresh
-    ):
-
-        super().__init__(
-            master
-        )
-
-        self.title(
-            "Familie bearbeiten"
-            if family
-            else
-            "Neue Familie"
-        )
-
-        self.geometry(
-            "450x230"
-        )
-
-        self.data = data
-        self.family = family
-        self.refresh = refresh
-
-        frame = ttk.Frame(
-            self,
-            padding=15
-        )
-
-        frame.pack(
-            fill="both",
-            expand=True
-        )
-
-        ttk.Label(
-            frame,
-            text="Familienname"
-        ).grid(
-            row=0,
-            column=0,
-            sticky="w",
-            pady=5
-        )
-
-        self.name_var = tk.StringVar(
-            value=family.name
-            if family
-            else ""
-        )
-
-        ttk.Entry(
-            frame,
-            textvariable=self.name_var,
-            width=35
-        ).grid(
-            row=0,
-            column=1,
-            sticky="ew"
-        )
-
-        ttk.Label(
-            frame,
-            text="Farbe"
-        ).grid(
-            row=1,
-            column=0,
-            sticky="w",
-            pady=5
-        )
-
-        self.color_var = tk.StringVar(
-            value=family.color
-            if family
-            else "#ffffff"
-        )
-
-        ttk.Entry(
-            frame,
-            textvariable=self.color_var,
-            width=20
-        ).grid(
-            row=1,
-            column=1,
-            sticky="w"
-        )
-
-        ttk.Button(
-            frame,
-            text="Farbe auswählen",
-            command=self.choose_color
-        ).grid(
-            row=2,
-            column=1,
-            sticky="w",
-            pady=5
-        )
-
-        buttons = ttk.Frame(
-            frame
-        )
-
-        buttons.grid(
-            row=3,
-            column=0,
-            columnspan=2,
-            sticky="e",
-            pady=15
-        )
-
-        ttk.Button(
-            buttons,
-            text="Abbrechen",
-            command=self.destroy
-        ).pack(
-            side="right"
-        )
-
-        ttk.Button(
-            buttons,
-            text="Speichern",
-            command=self.save
-        ).pack(
-            side="right",
-            padx=5
-        )
-
-        frame.columnconfigure(
-            1,
-            weight=1
-        )
-
-        self.transient(
-            master
-        )
-
-        self.grab_set()
-
-    def choose_color(self):
-
-        from tkinter import colorchooser
-
-        color = colorchooser.askcolor(
-            initialcolor=self.color_var.get()
-        )[1]
-
-        if color:
-            self.color_var.set(
-                color
-            )
-
-    def save(self):
-
-        name = self.name_var.get().strip()
-
-        if not name:
-            messagebox.showerror(
-                "Fehler",
-                "Der Familienname darf nicht leer sein."
-            )
-            return
-
-        if self.family:
-
-            old_name = self.family.name
-
-            self.data.rename_family(
-                old_name,
-                name
-            )
-
-            self.data.families[
-                name
-            ].color = self.color_var.get()
-
-        else:
-
-            self.data.families[
-                name
-            ] = self.data.families.get(
-                name
-            ) or __import__(
-                "models"
-            ).Family(
-                name=name,
-                color=self.color_var.get()
-            )
-
-        self.refresh()
-
-        self.destroy()
-
-
-class BackgroundDialog(tk.Toplevel):
-
-    def __init__(
-        self,
-        master,
-        data,
-        refresh
-    ):
-
-        super().__init__(
-            master
-        )
-
-        self.title(
-            "Hintergrund"
-        )
-
-        self.geometry(
-            "650x260"
-        )
-
-        self.data = data
-        self.refresh = refresh
-
-        frame = ttk.Frame(
-            self,
-            padding=15
-        )
-
-        frame.pack(
-            fill="both",
-            expand=True
-        )
-
-        ttk.Label(
-            frame,
-            text=(
-                "Bildquelle\n"
-                "Lokaler Pfad oder HTTP(S)-Link"
-            )
-        ).grid(
-            row=0,
-            column=0,
-            sticky="nw",
-            pady=5
-        )
-
-        self.source_var = tk.StringVar(
-            value=data.background.source
-        )
-
-        ttk.Entry(
-            frame,
-            textvariable=self.source_var,
-            width=55
-        ).grid(
-            row=0,
-            column=1,
-            sticky="ew"
-        )
-
-        ttk.Button(
-            frame,
-            text="Datei auswählen",
-            command=self.choose_file
-        ).grid(
-            row=1,
-            column=1,
-            sticky="w",
-            pady=5
-        )
-
-        ttk.Label(
-            frame,
-            text="Darstellung"
-        ).grid(
-            row=2,
-            column=0,
-            sticky="w",
-            pady=10
-        )
-
-        self.mode_var = tk.StringVar(
-            value=data.background.mode
-        )
-
-        ttk.Radiobutton(
-            frame,
-            text="Kacheln",
-            variable=self.mode_var,
-            value="tile"
-        ).grid(
-            row=2,
-            column=1,
-            sticky="w"
-        )
-
-        ttk.Radiobutton(
-            frame,
-            text="Auf sichtbaren Bereich strecken",
-            variable=self.mode_var,
-            value="stretch"
-        ).grid(
-            row=3,
-            column=1,
-            sticky="w"
-        )
-
-        buttons = ttk.Frame(
-            frame
-        )
-
-        buttons.grid(
-            row=5,
-            column=0,
-            columnspan=2,
-            sticky="e",
-            pady=15
-        )
-
-        ttk.Button(
-            buttons,
-            text="Hintergrund entfernen",
-            command=self.remove_background
-        ).pack(
-            side="left",
-            padx=5
-        )
-
-        ttk.Button(
-            buttons,
-            text="Abbrechen",
-            command=self.destroy
-        ).pack(
-            side="right"
-        )
-
-        ttk.Button(
-            buttons,
-            text="Speichern",
-            command=self.save
-        ).pack(
-            side="right",
-            padx=5
-        )
-
-        frame.columnconfigure(
-            1,
-            weight=1
-        )
-
-        self.transient(
-            master
-        )
-
-        self.grab_set()
-
-    def choose_file(self):
-
-        from tkinter import filedialog
-
-        path = filedialog.askopenfilename(
-            title="Hintergrundbild auswählen",
-            filetypes=[
-                (
-                    "Bilder",
-                    "*.png *.jpg *.jpeg *.gif *.bmp *.webp"
-                ),
-                (
-                    "Alle Dateien",
-                    "*.*"
-                )
-            ]
-        )
-
-        if path:
-            self.source_var.set(
-                path
-            )
-
-    def save(self):
-
-        self.data.background.source = (
-            self.source_var.get().strip()
-        )
-
-        self.data.background.mode = (
-            self.mode_var.get()
-        )
-
-        self.refresh()
-
-        self.destroy()
-
-    def remove_background(self):
-
-        self.data.background.source = ""
-
-        self.refresh()
-
-        self.destroy()
