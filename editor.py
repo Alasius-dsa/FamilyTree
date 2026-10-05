@@ -11,7 +11,7 @@ BASE_FONT, MIN_FONT = 16, 8
 
 class TreeCanvas(tk.Canvas):
     def __init__(self,master,data,on_edit,**kwargs):
-        super().__init__(master,background="#f4f4f4",highlightthickness=0,**kwargs)
+        super().__init__(master,background="#000000",highlightthickness=0,**kwargs)
         self.data,self.on_edit=data,on_edit
         self.zoom=1.0; self.pan_x=0.0; self.pan_y=0.0
         self.drag_id=None; self.drag_offset=(0,0); self.pan_start=None
@@ -41,6 +41,9 @@ class TreeCanvas(tk.Canvas):
             from PIL import Image,ImageTk
             image=self._load_background_image(source)
             if image is None:return
+            from PIL import Image
+            alpha=max(0.0,min(1.0,float(self.data.background.alpha)))
+            image=Image.blend(Image.new("RGB",image.size,(0,0,0)),image,alpha)
             w=max(1,self.winfo_width()); h=max(1,self.winfo_height())
             if self.data.background.mode=="stretch":
                 image=image.resize((w,h))
@@ -60,7 +63,23 @@ class TreeCanvas(tk.Canvas):
         return min(MAX_BOX_WIDTH,max(BOX_W,longest*9+30))
     def _font_size(self,p):
         w=self._box_width(p); longest=max(len(p.display_name()),1)
-        return max(MIN_FONT,int(BASE_FONT*max(1,(w-20))/(longest*9)))
+        return max(MIN_FONT,min(BASE_FONT,int((w-20)/(max(longest,1)*0.58))))
+
+    def _contrast_text(self,colors):
+        def rgb(v):
+            v=v.lstrip("#")
+            if len(v)!=6:return (255,255,255)
+            return tuple(int(v[i:i+2],16) for i in (0,2,4))
+        vals=[rgb(c) for c in colors]
+        def lum(v):
+            q=[]
+            for x in v:
+                x/=255
+                q.append(x/12.92 if x<=.04045 else ((x+.055)/1.055)**2.4)
+            return .2126*q[0]+.7152*q[1]+.0722*q[2]
+        def ratio(t,b):
+            a,c=lum(t),lum(b);return (max(a,c)+.05)/(min(a,c)+.05)
+        return "#000000" if min(ratio((0,0,0),v) for v in vals)>=min(ratio((255,255,255),v) for v in vals) else "#ffffff"
 
     def _draw_connections(self):
         for c in self.data.connections:
@@ -94,8 +113,9 @@ class TreeCanvas(tk.Canvas):
             self.create_rectangle(x,y,x+w,y+h,fill="",outline="#222",width=2,tags=tag)
         if self.zoom>=0.42:
             fs=max(MIN_FONT,int(self._font_size(p)*self.zoom))
-            self.create_text(x+10*self.zoom,y+25*self.zoom,anchor="w",text=p.first_name,font=("Arial",fs,"bold"),tags=tag)
-            self.create_text(x+10*self.zoom,y+48*self.zoom,anchor="w",text=" ".join(q for q in (p.name_prefix,p.family_name) if q),font=("Arial",fs),tags=tag)
+            text_color=self._contrast_text(colors)
+            self.create_text(x+10*self.zoom,y+25*self.zoom,anchor="w",text=p.first_name,font=("Arial",fs,"bold"),fill=text_color,tags=tag)
+            self.create_text(x+10*self.zoom,y+48*self.zoom,anchor="w",text=" ".join(q for q in (p.name_prefix,p.family_name) if q),font=("Arial",fs),fill=text_color,tags=tag)
         if self.zoom>=0.62:
             self.create_text(x+10*self.zoom,y+73*self.zoom,anchor="w",text=f"Geb.: {self._date_text(p.birth_date)}",font=("Arial",max(7,int(11*self.zoom))),tags=tag)
             self.create_text(x+10*self.zoom,y+92*self.zoom,anchor="w",text=f"Tod: {self._date_text(p.death_date)}",font=("Arial",max(7,int(11*self.zoom))),tags=tag)
