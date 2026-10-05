@@ -17,8 +17,11 @@ class DateWidget(ttk.Frame):
         self.refresh_calendars()
         self.combo.bind("<<ComboboxSelected>>",lambda e:self._refresh_months())
         if isinstance(value,dict):
-            self.calendar_var.set(value.get("calendar_id","")); self.day.set(str(value.get("day",""))); self.year.set(str(value.get("year","")))
-            self._refresh_months(); self.month.set(str(value.get("month","")))
+            self.calendar_var.set(value.get("calendar_id",""))
+            self.day.set("" if value.get("day") is None else str(value.get("day")))
+            self.year.set("" if value.get("year") is None else str(value.get("year")))
+            self._refresh_months()
+            self.month.set("" if value.get("month") is None else str(value.get("month")))
         elif isinstance(value,str) and value:
             self._parse_string(value)
     def refresh_calendars(self):
@@ -41,14 +44,22 @@ class DateWidget(ttk.Frame):
                 self.calendar_var.set(c.name); self._refresh_months(); self.day.set(str(parsed[0])); self.month.set(str(parsed[1])); self.year.set(str(parsed[2])); return
     def get(self):
         c=self._selected()
-        if not c or not self.day.get() or not self.month.get() or not self.year.get():return ""
-        try: day,year=int(self.day.get()),int(self.year.get())
+        if not c or not self.year.get():return ""
+        try: year=int(self.year.get())
         except ValueError:return ""
-        try: month=self.monthbox["values"].index(self.month.get())+1
-        except ValueError:
-            try: month=int(self.month.get())
+        month=None
+        if self.month.get():
+            try: month=self.monthbox["values"].index(self.month.get())+1
+            except ValueError:
+                try: month=int(self.month.get())
+                except ValueError:return ""
+            if not 1<=month<=len(c.months):return ""
+        day=None
+        if self.day.get():
+            if month is None:return ""
+            try: day=int(self.day.get())
             except ValueError:return ""
-        if not 1<=day<=c.month_days(month):return ""
+            if not 1<=day<=c.month_days(month):return ""
         return {"calendar_id":c.id,"day":day,"month":month,"year":year}
     def text(self):
         v=self.get()
