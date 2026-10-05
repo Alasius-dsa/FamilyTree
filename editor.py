@@ -258,8 +258,8 @@ class TreeCanvas(tk.Canvas):
     def auto_layout(self):
         persons=self.data.persons
         if not persons:return
-        parents={p.id:[] for p in persons}
-        children={p.id:[] for p in persons}
+        parents={pid:[] for pid in persons}
+        children={pid:[] for pid in persons}
         for c in self.data.connections:
             if c.relation=="parent" and c.source in persons and c.target in persons:
                 parents[c.target].append(c.source); children[c.source].append(c.target)
