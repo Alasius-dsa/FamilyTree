@@ -1,0 +1,56 @@
+{
+  "id": "dsa",
+  "name": "Aventurischer Kalender",
+  "months": [
+    {
+      "name": "Praios",
+      "days": 30
+    },
+    {
+      "name": "Rondra",
+      "days": 30
+    },
+    {
+      "name": "Efferd",
+      "days": 30
+    },
+    {
+      "name": "Travia",
+      "days": 30
+    },
+    {
+      "name": "Boron",
+      "days": 30
+    },
+    {
+      "name": "Hesinde",
+      "days": 30
+    },
+    {
+      "name": "Firun",
+      "days": 30
+    },
+    {
+      "name": "Tsa",
+      "days": 30
+    },
+    {
+      "name": "Phex",
+      "days": 30
+    },
+    {
+      "name": "Peraine",
+      "days": 30
+    },
+    {
+      "name": "Ingerimm",
+      "days": 30
+    },
+    {
+      "name": "Rahja",
+      "days": 30
+    }
+  ],
+  "era_name": "Bosparanische Zeitrechnung",
+  "era_abbreviation": "BF"
+}
