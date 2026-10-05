@@ -35,18 +35,26 @@ class CalendarDefinition:
     def parse_date(self,value:str)->tuple[int,int,int]|None:
         value=value.strip()
         if not value:return None
-        m=re.match(r"^(\d{1,3})[./-](\d{1,2})[./-](-?\d+)(?:\s+[A-Za-zÄÖÜäöüß.]+)?$",value)
-        if m:
-            day,month,year=map(int,m.groups())
-            return (day,month,year) if 1<=month<=len(self.months) and 1<=day<=self.month_days(month) else None
         parts=value.split()
         if len(parts)>=3:
-            try: day=int(parts[0].rstrip(".")); year=int(parts[-1])
-            except ValueError:return None
-            month_text=" ".join(parts[1:-1]).rstrip(".")
-            for i,month in enumerate(self.months,1):
-                if month_text.lower()==str(month.get("name","")).lower() and 1<=day<=self.month_days(i):
-                    return day,i,year
+            era_token=parts[-1].rstrip(".")
+            body=parts[:-1] if era_token.lower() in {self.era_abbreviation.lower(),self.era_name.lower()} else parts
+            if len(body)>=3:
+                try:
+                    day=int(body[0].rstrip("."))
+                    year=int(body[-1])
+                except ValueError:
+                    day=year=None
+                if day is not None:
+                    month_text=" ".join(body[1:-1]).strip().rstrip(".")
+                    for i,m in enumerate(self.months,1):
+                        if month_text.lower() in {str(m.get("name","")).lower(),str(i)} and 1<=day<=self.month_days(i):
+                            return day,i,year
+        m=re.match(r"^(\d{1,3})[./-](\d{1,2})[./-](-?\d+)(?:\s+[^\s]+)?$",value)
+        if m:
+            day,month,year=map(int,m.groups())
+            if 1<=month<=len(self.months) and 1<=day<=self.month_days(month):
+                return day,month,year
         return None
 
 def calendar_directory()->Path:
