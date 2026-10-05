@@ -59,10 +59,30 @@ class TreeCanvas(tk.Canvas):
         except Exception: pass
 
     def _box_width(self,p):
-        longest=max(len(p.first_name or ""),len(p.name_prefix or ""),len(p.family_name or ""),1)
-        return max(BOX_W,longest*10+30)
+        # Size the box for the actual two name lines.
+        line1=p.first_name or ""
+        line2=" ".join(q for q in (p.name_prefix,p.family_name) if q)
+        longest=max(len(line1),len(line2),1)
+        return max(BOX_W,longest*10+34)
+
+    def _fit_text(self,text,font,available_width):
+        # Canvas text does not clip to a rectangle, so shorten names explicitly.
+        if not text:return ""
+        from tkinter import font as tkfont
+        f=tkfont.Font(font=font)
+        if f.measure(text)<=available_width:return text
+        ellipsis="..."
+        if f.measure(ellipsis)>available_width:return ""
+        lo,hi=0,len(text)
+        while lo<hi:
+            mid=(lo+hi+1)//2
+            if f.measure(text[:mid]+ellipsis)<=available_width:lo=mid
+            else:hi=mid-1
+        return text[:lo]+ellipsis
+
     def _font_size(self,p):
-        w=self._box_width(p); longest=max(len(p.display_name()),1)
+        w=self._box_width(p)
+        longest=max(len(p.first_name or ""),len(" ".join(q for q in (p.name_prefix,p.family_name) if q)),1)
         return max(MIN_FONT,min(BASE_FONT,int((w-20)/(max(longest,1)*0.58))))
 
     def _contrast_text(self,colors):
@@ -82,33 +102,48 @@ class TreeCanvas(tk.Canvas):
         return "#000000" if min(ratio((0,0,0),v) for v in vals)>=min(ratio((255,255,255),v) for v in vals) else "#ffffff"
 
     def _draw_connections(self):
+        # Spouse connections are independent. Parent connections are grouped
+        # by child so the final segment becomes one combined multicolor arrow.
+        parent_groups={}
         for c in self.data.connections:
-            a,b=self.data.persons.get(c.source),self.data.persons.get(c.target)
+            a=self.data.persons.get(c.source)
+            b=self.data.persons.get(c.target)
             if not a or not b: continue
-            colors=self.data.get_family_colors(a.family_name)
-            points=[(a.x+self._box_width(a),a.y+BOX_H/2),((a.x+self._box_width(a)+b.x)/2,a.y+BOX_H/2),((a.x+self._box_width(a)+b.x)/2,b.y+BOX_H/2),(b.x,b.y+BOX_H/2)] if c.relation=="spouse" else [(a.x+self._box_width(a)/2,a.y+BOX_H),(a.x+self._box_width(a)/2,(a.y+BOX_H+b.y)/2),(b.x+self._box_width(b)/2,(a.y+BOX_H+b.y)/2),(b.x+self._box_width(b)/2,b.y)]
-            self._striped_polyline(points,colors,c.relation=="spouse",[1.0,1.0,1.0]) if c.relation=="spouse" else self._striped_polyline(points,colors,False,[1.35,0.9,0.75])
-    def _striped_polyline(self,points,colors,dashed=False,widths=None):
-        # Draw a black/white outer stroke, then up to four parallel longitudinal stripes.
-        def screen(p): return self.world_to_screen(p[0],p[1])
-        outer=max(2,int((CONNECTION_WIDTH+4)*self.zoom))
-        sp=[screen(p) for p in points]
-        flat=[v for p in sp for v in p]
-        self.create_line(*flat,fill="#ffffff",width=outer+3,arrow=tk.LAST,tags="connection")
-        self.create_line(*flat,fill="#000000",width=outer,arrow=tk.LAST,tags="connection")
-        colors=colors[:4] or ["#ffffff"]
-        n=len(colors); stripe=max(1,(CONNECTION_WIDTH*self.zoom)/n)
-        for j in range(len(sp)-1):
-            scale=(widths[j] if widths and j<len(widths) else 1.0)
-            segment_inner=max(1,CONNECTION_WIDTH*self.zoom*scale)
-            segment_stripe=max(1,segment_inner/n)
-            x1,y1=sp[j];x2,y2=sp[j+1]
-            dx,dy=x2-x1,y2-y1; length=max((dx*dx+dy*dy)**0.5,1)
-            nx,ny=-dy/length,dx/length
-            for i,color in enumerate(colors):
-                offset=(i-(n-1)/2)*segment_stripe
-                ox,oy=nx*offset,ny*offset
-                self.create_line(x1+ox,y1+oy,x2+ox,y2+oy,fill=color,width=max(1,int(segment_stripe)+1),arrow=tk.LAST if j==len(sp)-2 else tk.NONE,tags="connection")
+            if c.relation=="parent":
+                parent_groups.setdefault(c.target,[]).append(a)
+            else:
+                colors=self.data.get_family_colors(a.family_name)
+                points=[
+                    (a.x+self._box_width(a),a.y+BOX_H/2),
+                    ((a.x+self._box_width(a)+b.x)/2,a.y+BOX_H/2),
+                    ((a.x+self._box_width(a)+b.x)/2,b.y+BOX_H/2),
+                    (b.x,b.y+BOX_H/2)
+                ]
+                self._striped_polyline(points,colors,True,[1.0,1.0,1.0])
+
+        for child_id,parents in parent_groups.items():
+            child=self.data.persons.get(child_id)
+            if not child: continue
+            parents=sorted(parents,key=lambda p:(p.y,p.x,p.id))
+            child_cx=child.x+self._box_width(child)/2
+            junction_y=child.y-(BOX_H*0.35)
+            combined=[]
+            for parent in parents:
+                parent_colors=self.data.get_family_colors(parent.family_name)
+                for color in parent_colors:
+                    if color not in combined and len(combined)<4:
+                        combined.append(color)
+                branch=[
+                    (parent.x+self._box_width(parent)/2,parent.y+BOX_H),
+                    (parent.x+self._box_width(parent)/2,junction_y),
+                    (child_cx,junction_y)
+                ]
+                self._striped_polyline(branch,parent_colors,False,[1.35,0.9])
+            if not combined: combined=["#ffffff"]
+            self._striped_polyline(
+                [(child_cx,junction_y),(child_cx,child.y)],
+                combined,False,[0.75]
+            )
 
     def _polyline(self,points,dashed=False,width=None,width2=None):
         flat=[]
@@ -131,8 +166,14 @@ class TreeCanvas(tk.Canvas):
         if self.zoom>=0.42:
             fs=max(MIN_FONT,int(self._font_size(p)*self.zoom))
             text_color=self._contrast_text(colors)
-            self.create_text(x+10*self.zoom,y+25*self.zoom,anchor="w",text=p.first_name,font=("Arial",fs,"bold"),fill=text_color,tags=tag)
-            self.create_text(x+10*self.zoom,y+48*self.zoom,anchor="w",text=" ".join(q for q in (p.name_prefix,p.family_name) if q),font=("Arial",fs),fill=text_color,tags=tag)
+            first_font=("Arial",fs,"bold")
+            family_font=("Arial",fs)
+            available=max(1,w-20*self.zoom)
+            first=self._fit_text(p.first_name,first_font,available)
+            family=" ".join(q for q in (p.name_prefix,p.family_name) if q)
+            family=self._fit_text(family,family_font,available)
+            self.create_text(x+10*self.zoom,y+25*self.zoom,anchor="w",text=first,font=first_font,fill=text_color,tags=tag)
+            self.create_text(x+10*self.zoom,y+48*self.zoom,anchor="w",text=family,font=family_font,fill=text_color,tags=tag)
         if self.zoom>=0.62:
             self.create_text(x+10*self.zoom,y+73*self.zoom,anchor="w",text=f"Geb.: {self._date_text(p.birth_date)}",font=("Arial",max(7,int(11*self.zoom))),tags=tag)
             self.create_text(x+10*self.zoom,y+92*self.zoom,anchor="w",text=f"Tod: {self._date_text(p.death_date)}",font=("Arial",max(7,int(11*self.zoom))),tags=tag)
@@ -248,5 +289,7 @@ class SidePanel(ttk.Frame):
     def manage_calendars(self):CalendarManagerDialog(self,self.refresh)
     def background(self):BackgroundDialog(self,self.data,self.refresh)
     def auto_layout(self):
-        canvas=self.master.master.canvas; canvas.auto_layout(); self.refresh()
+        if getattr(self,"canvas",None) is not None:
+            self.canvas.auto_layout()
+            self.refresh()
 
