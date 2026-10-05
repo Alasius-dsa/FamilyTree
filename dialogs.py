@@ -24,7 +24,8 @@ class DateWidget(ttk.Frame):
     def refresh_calendars(self):
         self.cals=load_calendars(); self.labels=[c.name for c in self.cals.values()]
         self.combo["values"]=self.labels
-        if self.calendar_var.get() in self.cals:return
+        current=self._selected()
+        if current:self.calendar_var.set(current.name)
         if self.labels:self.calendar_var.set(self.labels[0])
         self._refresh_months()
     def _selected(self):
