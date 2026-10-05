@@ -60,7 +60,7 @@ class TreeCanvas(tk.Canvas):
 
     def _box_width(self,p):
         longest=max(len(p.first_name or ""),len(p.name_prefix or ""),len(p.family_name or ""),1)
-        return min(MAX_BOX_WIDTH,max(BOX_W,longest*9+30))
+        return max(BOX_W,longest*10+30)
     def _font_size(self,p):
         w=self._box_width(p); longest=max(len(p.display_name()),1)
         return max(MIN_FONT,min(BASE_FONT,int((w-20)/(max(longest,1)*0.58))))
