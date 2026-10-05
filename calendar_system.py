@@ -28,14 +28,41 @@ class CalendarDefinition:
     def month_days(self,month:int)->int:
         return int(self.months[month-1].get("days",0)) if 1<=month<=len(self.months) else 0
 
-    def format_date(self,day:int,month:int,year:int)->str:
-        name=self.months[month-1].get("name",str(month)) if 1<=month<=len(self.months) else str(month)
-        return f"{day}. {name} {year} {self.era_abbreviation}".strip()
+    def format_date(self,day:int|None,month:int|None,year:int)->str:
+        parts=[]
+        if day is not None and month is not None:
+            name=self.months[month-1].get("name",str(month)) if 1<=month<=len(self.months) else str(month)
+            parts.append(f"{day}. {name}")
+        elif month is not None:
+            name=self.months[month-1].get("name",str(month)) if 1<=month<=len(self.months) else str(month)
+            parts.append(name)
+        parts.append(str(year))
+        if self.era_abbreviation:
+            parts.append(self.era_abbreviation)
+        return " ".join(parts)
 
-    def parse_date(self,value:str)->tuple[int,int,int]|None:
+    def parse_date(self,value:str)->tuple[int|None,int|None,int]|None:
         value=value.strip()
         if not value:return None
         parts=value.split()
+        era_tokens={self.era_abbreviation.lower(),self.era_name.lower()}
+        if parts and parts[-1].rstrip(".").lower() in era_tokens:
+            parts=parts[:-1]
+        # Year only.
+        if len(parts)==1:
+            try:return None,None,int(parts[0])
+            except ValueError:return None
+        # Month + year.
+        if len(parts)==2:
+            try:year=int(parts[1])
+            except ValueError:year=None
+            if year is not None:
+                month_text=parts[0].rstrip(".")
+                try:month=int(month_text)
+                except ValueError:
+                    month=next((i for i,m in enumerate(self.months,1) if month_text.lower()==str(m.get("name","")).lower()),0)
+                if 1<=month<=len(self.months):
+                    return None,month,year
         if len(parts)>=3:
             era_token=parts[-1].rstrip(".")
             body=parts[:-1] if era_token.lower() in {self.era_abbreviation.lower(),self.era_name.lower()} else parts
