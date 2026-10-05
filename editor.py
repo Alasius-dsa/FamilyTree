@@ -163,7 +163,6 @@ class TreeCanvas(tk.Canvas):
                 draw.text((2-bbox[0],2-bbox[1]),text,font=pil_font,fill=self._contrast_text([color]))
                 mask=Image.new("L",(tw,th),0)
                 md=ImageDraw.Draw(mask)
-                left=i*stripe_width-(x-(self.world_to_screen(0,0)[0] if False else 0))
                 # Text image starts at the same x coordinate as the first
                 # glyph, so stripe coordinates are relative to the person box.
                 text_start_in_box=10*self.zoom
@@ -175,7 +174,7 @@ class TreeCanvas(tk.Canvas):
                 base=Image.alpha_composite(base,layer)
             photo=ImageTk.PhotoImage(base)
             self.text_photos.append(photo)
-            self.create_image(x,y,anchor="nw",image=photo,tags=tag)
+            self.create_image(x,y-th/2,anchor="nw",image=photo,tags=tag)
         except Exception:
             # Portable fallback for systems without a usable TrueType font.
             # The normal character rendering still preserves the split.
