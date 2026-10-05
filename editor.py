@@ -102,25 +102,46 @@ class TreeCanvas(tk.Canvas):
         return "#000000" if min(ratio((0,0,0),v) for v in vals)>=min(ratio((255,255,255),v) for v in vals) else "#ffffff"
 
     def _contrast_text_at(self,colors,box_width,text_x,text_width):
-        # For split family boxes, choose the text colour from the half where
-        # the actual text lies. If it crosses the split, use the colour that
-        # remains readable against both covered halves.
+        # Kept for callers that need one colour, but split boxes are rendered
+        # character-by-character so the text colour can change at the family
+        # colour boundary.
         if len(colors)<=1:
             return self._contrast_text(colors)
-        left=0.0
-        right=box_width
-        text_left=max(0.0,text_x)
-        text_right=min(box_width,text_x+max(0.0,text_width))
-        covered=[]
         stripe=box_width/len(colors)
+        covered=[]
+        left=text_x
+        right=text_x+text_width
         for i,color in enumerate(colors):
             stripe_left=i*stripe
             stripe_right=(i+1)*stripe
-            if text_right>stripe_left and text_left<stripe_right:
+            if right>stripe_left and left<stripe_right:
                 covered.append(color)
-        if not covered:
-            covered=[colors[0]]
-        return self._contrast_text(covered)
+        return self._contrast_text(covered or [colors[0]])
+
+    def _draw_text_split(self,text,x,y,font,colors,box_width,tag):
+        if not text:
+            return
+        from tkinter import font as tkfont
+        f=tkfont.Font(font=font)
+        if len(colors)<=1:
+            self.create_text(x,y,anchor="w",text=text,font=font,
+                             fill=self._contrast_text(colors),tags=tag)
+            return
+
+        # Render every character separately. This is intentional: Tkinter's
+        # Canvas has no inline rich-text colour support. Each character gets
+        # the contrast colour of the half of the box it actually occupies.
+        stripe=box_width/len(colors)
+        cursor=x
+        for char in text:
+            width=f.measure(char)
+            if char:
+                midpoint=(cursor-x)+(width/2)
+                index=min(len(colors)-1,max(0,int(midpoint/stripe)))
+                color=self._contrast_text([colors[index]])
+                self.create_text(cursor,y,anchor="w",text=char,font=font,
+                                 fill=color,tags=tag)
+            cursor+=width
 
     def _striped_polyline(self,points,colors,dashed=False,widths=None,arrow=True):
         # Contrasting outline plus up to four parallel longitudinal colour
@@ -220,27 +241,20 @@ class TreeCanvas(tk.Canvas):
             first=self._fit_text(p.first_name,first_font,available)
             family=" ".join(q for q in (p.name_prefix,p.family_name) if q)
             family=self._fit_text(family,family_font,available)
-            first_x=10*self.zoom
-            family_x=10*self.zoom
-            from tkinter import font as tkfont
-            first_width=tkfont.Font(font=first_font).measure(first)
-            family_width=tkfont.Font(font=family_font).measure(family)
-            first_color=self._contrast_text_at(colors,self._box_width(p)*self.zoom,first_x,first_width)
-            family_color=self._contrast_text_at(colors,self._box_width(p)*self.zoom,family_x,family_width)
-            self.create_text(x+first_x,y+25*self.zoom,anchor="w",text=first,font=first_font,fill=first_color,tags=tag)
-            self.create_text(x+family_x,y+48*self.zoom,anchor="w",text=family,font=family_font,fill=family_color,tags=tag)
+            box_width=self._box_width(p)*self.zoom
+            self._draw_text_split(first,x+10*self.zoom,y+25*self.zoom,
+                                  first_font,colors,box_width,tag)
+            self._draw_text_split(family,x+10*self.zoom,y+48*self.zoom,
+                                  family_font,colors,box_width,tag)
         if self.zoom>=0.62:
             date_font=("Arial",max(7,int(11*self.zoom)))
             birth=self._date_text(p.birth_date)
             death=self._date_text(p.death_date)
-            date_x=10*self.zoom
-            date_font_obj=tkfont.Font(font=date_font)
-            birth_width=date_font_obj.measure(f"Geb.: {birth}")
-            death_width=date_font_obj.measure(f"Tod: {death}")
-            birth_color=self._contrast_text_at(colors,self._box_width(p)*self.zoom,date_x,birth_width)
-            death_color=self._contrast_text_at(colors,self._box_width(p)*self.zoom,date_x,death_width)
-            self.create_text(x+date_x,y+73*self.zoom,anchor="w",text=f"Geb.: {birth}",font=date_font,fill=birth_color,tags=tag)
-            self.create_text(x+date_x,y+92*self.zoom,anchor="w",text=f"Tod: {death}",font=date_font,fill=death_color,tags=tag)
+            box_width=self._box_width(p)*self.zoom
+            self._draw_text_split(f"Geb.: {birth}",x+10*self.zoom,
+                                  y+73*self.zoom,date_font,colors,box_width,tag)
+            self._draw_text_split(f"Tod: {death}",x+10*self.zoom,
+                                  y+92*self.zoom,date_font,colors,box_width,tag)
         if p.link and self.zoom>=0.35:self.create_text(x+w-17*self.zoom,y+17*self.zoom,text="🌐",font=("Arial",max(8,int(13*self.zoom))),tags=tag)
     def _date_text(self,v):
         if not v:return "—"
