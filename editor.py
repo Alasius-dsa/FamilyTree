@@ -30,7 +30,8 @@ class TreeCanvas(tk.Canvas):
         from PIL import Image
         from io import BytesIO
         if source.startswith(("http://","https://")):
-            with urlopen(source,timeout=10) as r: return Image.open(BytesIO(r.read())).convert("RGB")
+            req=__import__("urllib.request",fromlist=["Request"]).Request(source,headers={"User-Agent":"FantasyFamilyTree/1.0"})
+            with urlopen(req,timeout=10) as r: return Image.open(BytesIO(r.read())).convert("RGB")
         if os.path.isfile(source): return Image.open(source).convert("RGB")
         return None
     def _draw_background(self):
@@ -167,14 +168,15 @@ class TreeCanvas(tk.Canvas):
         for pid in persons:gen(pid)
         rows={}
         for pid,g in generations.items():rows.setdefault(g,[]).append(pid)
-        order={pid:i for i,pid in enumerate(persons)}
-        for row in rows.values():row.sort(key=lambda pid:order[pid])
-        y_gap=80
         for g,row in sorted(rows.items()):
+            def related_key(pid):
+                relatives=[persons[x].x+self._box_width(persons[x])/2 for x in parents[pid] if x in persons]
+                relatives += [persons[x].x+self._box_width(persons[x])/2 for x in children[pid] if x in persons]
+                return (sum(relatives)/len(relatives) if relatives else 0, persons[pid].display_name().lower())
+            row.sort(key=related_key)
             x=80
             for pid in row:
-                p=persons[pid]; p.x=x; p.y=80+g*(BOX_H+y_gap); x+=self._box_width(p)+4
-        # Keep related people adjacent without sacrificing the 4px non-overlap invariant.
+                p=persons[pid]; p.x=x; p.y=80+g*(BOX_H+80); x+=self._box_width(p)+4
         self.redraw()
 
 class SidePanel(ttk.Frame):
