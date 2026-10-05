@@ -94,8 +94,8 @@ class TreeCanvas(tk.Canvas):
         outer=max(2,int((CONNECTION_WIDTH+4)*self.zoom))
         sp=[screen(p) for p in points]
         flat=[v for p in sp for v in p]
-        self.create_line(*flat,fill="#ffffff",width=outer+3,tags="connection")
-        self.create_line(*flat,fill="#000000",width=outer,tags="connection")
+        self.create_line(*flat,fill="#ffffff",width=outer+3,arrow=tk.LAST,tags="connection")
+        self.create_line(*flat,fill="#000000",width=outer,arrow=tk.LAST,tags="connection")
         colors=colors[:4] or ["#ffffff"]
         n=len(colors); stripe=max(1,(CONNECTION_WIDTH*self.zoom)/n)
         for j in range(len(sp)-1):
@@ -108,7 +108,7 @@ class TreeCanvas(tk.Canvas):
             for i,color in enumerate(colors):
                 offset=(i-(n-1)/2)*segment_stripe
                 ox,oy=nx*offset,ny*offset
-                self.create_line(x1+ox,y1+oy,x2+ox,y2+oy,fill=color,width=max(1,int(segment_stripe)+1),tags="connection")
+                self.create_line(x1+ox,y1+oy,x2+ox,y2+oy,fill=color,width=max(1,int(segment_stripe)+1),arrow=tk.LAST if j==len(sp)-2 else tk.NONE,tags="connection")
 
     def _polyline(self,points,dashed=False,width=None,width2=None):
         flat=[]
