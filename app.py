@@ -153,6 +153,9 @@ class FamilyTreeApp:
             expand=True
         )
 
+        # Explicit reference; do not depend on the Tk parent hierarchy.
+        self.panel.canvas = self.canvas
+
     # =============================================================
     # Aktualisieren
     # =============================================================
