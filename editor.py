@@ -16,6 +16,7 @@ class TreeCanvas(tk.Canvas):
         self.zoom=1.0; self.pan_x=0.0; self.pan_y=0.0
         self.drag_id=None; self.drag_offset=(0,0); self.pan_start=None
         self.background_photo=None
+        self.text_photos=[]
         self.bind("<ButtonPress-1>",self._press); self.bind("<B1-Motion>",self._drag); self.bind("<ButtonRelease-1>",self._release)
         self.bind("<ButtonPress-2>",self._middle_press); self.bind("<B2-Motion>",self._middle_drag); self.bind("<ButtonRelease-2>",self._middle_release)
         self.bind("<Button-3>",self._right_click); self.bind("<Double-Button-1>",self._double_click)
@@ -25,7 +26,7 @@ class TreeCanvas(tk.Canvas):
     def world_to_screen(self,x,y): return x*self.zoom+self.pan_x,y*self.zoom+self.pan_y
     def screen_to_world(self,x,y): return (x-self.pan_x)/self.zoom,(y-self.pan_y)/self.zoom
     def redraw(self):
-        self.delete("all"); self._draw_background(); self._draw_connections(); self._draw_persons()
+        self.delete("all"); self.text_photos=[]; self._draw_background(); self._draw_connections(); self._draw_persons()
     def _load_background_image(self,source):
         from PIL import Image
         from io import BytesIO
@@ -118,6 +119,18 @@ class TreeCanvas(tk.Canvas):
                 covered.append(color)
         return self._contrast_text(covered or [colors[0]])
 
+    def _font_file(self,bold=False):
+        import os
+        candidates=[]
+        if os.name=="nt":
+            candidates += [r"C:\\Windows\\Fonts\\arialbd.ttf" if bold else r"C:\\Windows\\Fonts\\arial.ttf"]
+        candidates += [
+            "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf" if bold else "/usr/share/fonts/truetype/msttcorefonts/Arial.ttf",
+            "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ]
+        return next((p for p in candidates if os.path.isfile(p)),None)
+
     def _draw_text_split(self,text,x,y,font,colors,box_width,tag):
         if not text:
             return
@@ -128,20 +141,53 @@ class TreeCanvas(tk.Canvas):
                              fill=self._contrast_text(colors),tags=tag)
             return
 
-        # Render every character separately. This is intentional: Tkinter's
-        # Canvas has no inline rich-text colour support. Each character gets
-        # the contrast colour of the half of the box it actually occupies.
-        stripe=box_width/len(colors)
-        cursor=x
-        for char in text:
-            width=f.measure(char)
-            if char:
+        # Render the complete string into one RGBA image and clip its alpha
+        # mask to the family-colour stripes. This allows a single glyph to be
+        # split at the boundary instead of assigning one colour per character.
+        try:
+            from PIL import Image,ImageDraw,ImageFont,ImageChops,ImageTk
+            bold=len(font)>=3 and font[2]=="bold"
+            size=max(1,int(font[1]))
+            font_path=self._font_file(bold)
+            if not font_path:
+                raise OSError("No compatible TrueType font found")
+            pil_font=ImageFont.truetype(font_path,size)
+            bbox=pil_font.getbbox(text)
+            tw=max(1,bbox[2]-bbox[0]+4)
+            th=max(1,bbox[3]-bbox[1]+4)
+            base=Image.new("RGBA",(tw,th),(0,0,0,0))
+            stripe_width=box_width/len(colors)
+            for i,color in enumerate(colors):
+                layer=Image.new("RGBA",(tw,th),(0,0,0,0))
+                draw=ImageDraw.Draw(layer)
+                draw.text((2-bbox[0],2-bbox[1]),text,font=pil_font,fill=self._contrast_text([color]))
+                mask=Image.new("L",(tw,th),0)
+                md=ImageDraw.Draw(mask)
+                left=i*stripe_width-(x-(self.world_to_screen(0,0)[0] if False else 0))
+                # Text image starts at the same x coordinate as the first
+                # glyph, so stripe coordinates are relative to the person box.
+                text_start_in_box=10*self.zoom
+                left=i*stripe_width-text_start_in_box
+                right=(i+1)*stripe_width-text_start_in_box
+                md.rectangle((max(0,left),0,min(tw,right),th),fill=255)
+                alpha=ImageChops.multiply(layer.getchannel("A"),mask)
+                layer.putalpha(alpha)
+                base=Image.alpha_composite(base,layer)
+            photo=ImageTk.PhotoImage(base)
+            self.text_photos.append(photo)
+            self.create_image(x,y,anchor="nw",image=photo,tags=tag)
+        except Exception:
+            # Portable fallback for systems without a usable TrueType font.
+            # The normal character rendering still preserves the split.
+            stripe=box_width/len(colors)
+            cursor=x
+            for char in text:
+                width=f.measure(char)
                 midpoint=(cursor-x)+(width/2)
                 index=min(len(colors)-1,max(0,int(midpoint/stripe)))
-                color=self._contrast_text([colors[index]])
                 self.create_text(cursor,y,anchor="w",text=char,font=font,
-                                 fill=color,tags=tag)
-            cursor+=width
+                                 fill=self._contrast_text([colors[index]]),tags=tag)
+                cursor+=width
 
     def _striped_polyline(self,points,colors,dashed=False,widths=None,arrow=True):
         # Contrasting outline plus up to four parallel longitudinal colour
