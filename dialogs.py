@@ -130,16 +130,18 @@ class FamilyDialog(tk.Toplevel):
 
 class BackgroundDialog(tk.Toplevel):
     def __init__(self,master,data,refresh):
-        super().__init__(master); self.data=data; self.refresh=refresh; self.title("Hintergrund"); self.geometry("700x240")
+        super().__init__(master); self.data=data; self.refresh=refresh; self.title("Hintergrund"); self.geometry("700x300")
         f=ttk.Frame(self,padding=15); f.pack(fill="both",expand=True); ttk.Label(f,text="Bildquelle (Datei oder HTTP(S)-URL)").grid(row=0,column=0,sticky="w"); self.source=tk.StringVar(value=data.background.source); ttk.Entry(f,textvariable=self.source,width=60).grid(row=0,column=1)
         ttk.Button(f,text="Datei auswählen",command=self.file).grid(row=1,column=1,sticky="w")
         self.mode=tk.StringVar(value=data.background.mode); ttk.Radiobutton(f,text="Kacheln",variable=self.mode,value="tile").grid(row=2,column=1,sticky="w"); ttk.Radiobutton(f,text="Strecken",variable=self.mode,value="stretch").grid(row=3,column=1,sticky="w")
-        ttk.Button(f,text="Entfernen",command=self.remove).grid(row=4,column=0,pady=15); ttk.Button(f,text="Speichern",command=self.save).grid(row=4,column=1,sticky="e")
+        ttk.Label(f,text="Hintergrund-Alpha (0 = vollständig schwarz)").grid(row=4,column=0,sticky="w")
+        self.alpha=tk.DoubleVar(value=float(data.background.alpha)*100); ttk.Scale(f,from_=0,to=100,variable=self.alpha,orient="horizontal",length=280).grid(row=4,column=1,sticky="w")
+        ttk.Button(f,text="Entfernen",command=self.remove).grid(row=5,column=0,pady=15); ttk.Button(f,text="Speichern",command=self.save).grid(row=5,column=1,sticky="e")
     def file(self):
         p=filedialog.askopenfilename(filetypes=[("Bilder","*.png *.jpg *.jpeg *.gif *.bmp *.webp"),("Alle","*.*")])
         if p:self.source.set(p)
     def save(self):
-        self.data.background.source=self.source.get().strip(); self.data.background.mode=self.mode.get(); self.refresh(); self.destroy()
+        self.data.background.source=self.source.get().strip(); self.data.background.mode=self.mode.get(); self.data.background.alpha=float(self.alpha.get())/100.0; self.refresh(); self.destroy()
     def remove(self):self.data.background.source="";self.refresh();self.destroy()
 
 class CalendarManagerDialog(tk.Toplevel):
