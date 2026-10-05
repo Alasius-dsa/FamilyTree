@@ -101,6 +101,34 @@ class TreeCanvas(tk.Canvas):
             a,c=lum(t),lum(b);return (max(a,c)+.05)/(min(a,c)+.05)
         return "#000000" if min(ratio((0,0,0),v) for v in vals)>=min(ratio((255,255,255),v) for v in vals) else "#ffffff"
 
+    def _striped_polyline(self,points,colors,dashed=False,widths=None,arrow=True):
+        # Contrasting outline plus up to four parallel longitudinal colour
+        # stripes. Only the outline carries the shared arrowhead.
+        def screen(p): return self.world_to_screen(p[0],p[1])
+        outer=max(2,int((CONNECTION_WIDTH+4)*self.zoom))
+        sp=[screen(p) for p in points]
+        flat=[v for p in sp for v in p]
+        arrow_mode=tk.LAST if arrow else tk.NONE
+        self.create_line(*flat,fill="#ffffff",width=outer+3,arrow=arrow_mode,tags="connection")
+        self.create_line(*flat,fill="#000000",width=outer,arrow=arrow_mode,tags="connection")
+        colors=colors[:4] or ["#ffffff"]
+        n=len(colors)
+        for j in range(len(sp)-1):
+            scale=(widths[j] if widths and j<len(widths) else 1.0)
+            segment_inner=max(1,CONNECTION_WIDTH*self.zoom*scale)
+            segment_stripe=max(1,segment_inner/n)
+            x1,y1=sp[j];x2,y2=sp[j+1]
+            dx,dy=x2-x1,y2-y1; length=max((dx*dx+dy*dy)**0.5,1)
+            nx,ny=-dy/length,dx/length
+            for i,color in enumerate(colors):
+                offset=(i-(n-1)/2)*segment_stripe
+                ox,oy=nx*offset,ny*offset
+                self.create_line(
+                    x1+ox,y1+oy,x2+ox,y2+oy,
+                    fill=color,width=max(1,int(segment_stripe)+1),
+                    arrow=tk.NONE,tags="connection"
+                )
+
     def _draw_connections(self):
         # Spouse connections are independent. Parent connections are grouped
         # by child so the final segment becomes one combined multicolor arrow.
@@ -138,11 +166,11 @@ class TreeCanvas(tk.Canvas):
                     (parent.x+self._box_width(parent)/2,junction_y),
                     (child_cx,junction_y)
                 ]
-                self._striped_polyline(branch,parent_colors,False,[1.35,0.9])
+                self._striped_polyline(branch,parent_colors,False,[1.35,0.9],False)
             if not combined: combined=["#ffffff"]
             self._striped_polyline(
                 [(child_cx,junction_y),(child_cx,child.y)],
-                combined,False,[0.75]
+                combined,False,[0.75],True
             )
 
     def _polyline(self,points,dashed=False,width=None,width2=None):
