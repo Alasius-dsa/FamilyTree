@@ -85,14 +85,18 @@ class TreeCanvas(tk.Canvas):
         for c in self.data.connections:
             a,b=self.data.persons.get(c.source),self.data.persons.get(c.target)
             if not a or not b: continue
-            if c.relation=="spouse": self._polyline([(a.x+self._box_width(a),a.y+BOX_H/2),((a.x+self._box_width(a)+b.x)/2,a.y+BOX_H/2),((a.x+self._box_width(a)+b.x)/2,b.y+BOX_H/2),(b.x,b.y+BOX_H/2)],True)
-            else: self._parent_line(a,b)
-    def _parent_line(self,a,b):
-        ax,ay=a.x+self._box_width(a)/2,a.y+BOX_H; bx,by=b.x+self._box_width(b)/2,b.y
-        mid=(ay+by)/2
-        # Draw in three segments: thicker at parent end, tapering toward child.
-        self._polyline([(ax,ay),(ax,mid)],False,CONNECTION_WIDTH*1.35,CONNECTION_WIDTH*.75)
-        self._polyline([(ax,mid),(bx,mid),(bx,by)],False,CONNECTION_WIDTH*.75,CONNECTION_WIDTH*.75)
+            colors=self.data.get_family_colors(a.family_name)
+            points=[(a.x+self._box_width(a),a.y+BOX_H/2),((a.x+self._box_width(a)+b.x)/2,a.y+BOX_H/2),((a.x+self._box_width(a)+b.x)/2,b.y+BOX_H/2),(b.x,b.y+BOX_H/2)] if c.relation=="spouse" else [(a.x+self._box_width(a)/2,a.y+BOX_H),(a.x+self._box_width(a)/2,(a.y+BOX_H+b.y)/2),(b.x+self._box_width(b)/2,(a.y+BOX_H+b.y)/2),(b.x+self._box_width(b)/2,b.y)]
+            self._striped_polyline(points,colors,c.relation=="spouse")
+    def _striped_polyline(self,points,colors,dashed=False):
+        flat=[]
+        for x,y in points: flat.extend(self.world_to_screen(x,y))
+        outer=max(2,int((CONNECTION_WIDTH+3)*self.zoom))
+        self.create_line(*flat,fill="#ffffff",width=outer+3,tags="connection")
+        self.create_line(*flat,fill="#000000",width=outer,tags="connection")
+        n=max(1,min(4,len(colors))); inner=max(1,int(CONNECTION_WIDTH*self.zoom)); stripe=max(1,int(inner/n))
+        for i,color in enumerate(colors[:n]):
+            self.create_line(*flat,fill=color,width=stripe+1,tags="connection")
     def _polyline(self,points,dashed=False,width=None,width2=None):
         flat=[]
         for x,y in points: flat.extend(self.world_to_screen(x,y))
