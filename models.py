@@ -42,6 +42,7 @@ class Connection:
 class BackgroundSettings:
     source:str=""
     mode:str="tile"
+    alpha:float=1.0
 
 @dataclass
 class FamilyTreeData:
@@ -91,5 +92,5 @@ class FamilyTreeData:
         for name,f in raw.get("families",{}).items():data.families[name]=Family(name,f.get("color","#ffffff"))
         for p in data.persons.values():data.ensure_families_for_person(p)
         for c in raw.get("connections",[]):data.connections.append(Connection(**c))
-        b=raw.get("background",{});data.background=BackgroundSettings(b.get("source",""),b.get("mode","tile"))
+        b=raw.get("background",{});data.background=BackgroundSettings(b.get("source",""),b.get("mode","tile"),float(b.get("alpha",1.0)))
         return data
