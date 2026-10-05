@@ -258,31 +258,120 @@ class TreeCanvas(tk.Canvas):
     def auto_layout(self):
         persons=self.data.persons
         if not persons:return
+
+        # Build the parent/child graph first.  The generation with the most
+        # people is used as the fixed reference row; all other rows are then
+        # positioned relative to people that are already positioned.
         parents={pid:[] for pid in persons}
         children={pid:[] for pid in persons}
         for c in self.data.connections:
             if c.relation=="parent" and c.source in persons and c.target in persons:
-                parents[c.target].append(c.source); children[c.source].append(c.target)
+                parents[c.target].append(c.source)
+                children[c.source].append(c.target)
+
         generations={}
         def gen(pid,stack=None):
             if pid in generations:return generations[pid]
-            stack=stack or set()
+            stack=set() if stack is None else set(stack)
             if pid in stack:return 0
             stack.add(pid)
-            generations[pid]=max((gen(x,stack)+1 for x in parents[pid]),default=0)
-            return generations[pid]
-        for pid in persons:gen(pid)
+            value=max((gen(parent,stack)+1 for parent in parents[pid]),default=0)
+            generations[pid]=value
+            return value
+
+        for pid in persons:
+            gen(pid)
+
         rows={}
-        for pid,g in generations.items():rows.setdefault(g,[]).append(pid)
-        for g,row in sorted(rows.items()):
-            def related_key(pid):
-                relatives=[persons[x].x+self._box_width(persons[x])/2 for x in parents[pid] if x in persons]
-                relatives += [persons[x].x+self._box_width(persons[x])/2 for x in children[pid] if x in persons]
-                return (sum(relatives)/len(relatives) if relatives else 0, persons[pid].display_name().lower())
-            row.sort(key=related_key)
-            x=80
+        for pid,g in generations.items():
+            rows.setdefault(g,[]).append(pid)
+
+        # Pick the densest generation as the visual anchor.  Existing x
+        # positions are only used to make repeated auto-layouts stable.
+        anchor_g=max(rows,key=lambda g:(len(rows[g]),-g))
+        anchor=rows[anchor_g]
+        anchor.sort(key=lambda pid:(persons[pid].x,persons[pid].y,pid))
+
+        # A slot is a logical horizontal unit.  It is deliberately wider
+        # than the smallest person box so the reference row never overlaps.
+        slot=max(self._box_width(persons[pid]) for pid in anchor)+4
+        anchor_centers={}
+        for i,pid in enumerate(anchor):
+            center=i*slot
+            p=persons[pid]
+            p.x=center-self._box_width(p)/2
+            p.y=80+anchor_g*(BOX_H+80)
+            anchor_centers[pid]=center
+
+        positioned=set(anchor)
+
+        def center(pid):
+            p=persons[pid]
+            return p.x+self._box_width(p)/2
+
+        def related_target(pid,other_generation):
+            refs=[]
+            if other_generation < generations[pid]:
+                refs=[x for x in parents[pid] if x in positioned]
+            else:
+                refs=[x for x in children[pid] if x in positioned]
+            if refs:
+                return sum(center(x) for x in refs)/len(refs)
+            return None
+
+        def place_row(g,reference_direction):
+            row=rows.get(g,[])
+            if not row:return
+            # Put each person near the barycentre of their already-positioned
+            # relatives.  This keeps branches under/over their actual family
+            # instead of rebuilding every row from x=80.
+            targets=[]
+            fallback=sum(center(pid) for pid in positioned)/len(positioned) if positioned else 0
             for pid in row:
-                p=persons[pid]; p.x=x; p.y=80+g*(BOX_H+80); x+=self._box_width(p)+4
+                target=related_target(pid,reference_direction)
+                targets.append((fallback if target is None else target,pid))
+            targets.sort(key=lambda item:(item[0],persons[item[1]].display_name().lower(),item[1]))
+
+            y=80+g*(BOX_H+80)
+            previous_right=None
+            for target,pid in targets:
+                p=persons[pid]
+                w=self._box_width(p)
+                x=target-w/2
+                if previous_right is not None and x<previous_right+4:
+                    x=previous_right+4
+                p.x=x
+                p.y=y
+                previous_right=x+w
+                positioned.add(pid)
+
+            # A row can be pushed right by collision resolution.  Recenter the
+            # whole row around its relationship targets without ever creating
+            # an overlap.  The anchor row remains untouched.
+            if row is not anchor and len(targets)>1:
+                desired=sum(t for t,_ in targets)/len(targets)
+                actual=sum(center(pid) for _,pid in targets)/len(targets)
+                shift=desired-actual
+                if shift:
+                    for _,pid in targets:
+                        persons[pid].x+=shift
+
+                # The shift above can only preserve internal gaps; clamp the
+                # first box against its nearest previous box when necessary.
+                ordered=sorted((persons[pid] for _,pid in targets),key=lambda p:p.x)
+                for i,p in enumerate(ordered):
+                    if i:
+                        minimum=ordered[i-1].x+self._box_width(ordered[i-1])+4
+                        if p.x<minimum:p.x=minimum
+
+        # Work outwards from the densest row.  For parents, children are the
+        # reference points; for children, parents are the reference points.
+        for g in range(anchor_g-1,-1,-1):
+            place_row(g,g+1)
+        positioned=set(anchor)
+        for g in range(anchor_g+1,max(rows,default=anchor_g)+1):
+            place_row(g,g-1)
+
         self.redraw()
 
 class SidePanel(ttk.Frame):
